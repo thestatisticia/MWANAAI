@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { generateGemmaReply } from "@/lib/gemma";
-import { buildSystemPrompt, buildUserPayload } from "@/lib/prompts";
+import {
+  buildSystemPrompt,
+  buildUserPayload,
+  cleanChatReply,
+  localLanguageExplain,
+  looksLikePromptEcho,
+} from "@/lib/prompts";
 import {
   buildQuiz,
   buildQuizFeedback,
@@ -23,34 +29,6 @@ export const runtime = "nodejs";
 
 function uniqueTopics(topics: string[]): string[] {
   return [...new Set(topics.map((t) => t.trim()).filter(Boolean))];
-}
-
-function cleanChatReply(raw: string): string {
-  let text = raw.trim();
-  if (!text) return text;
-
-  // Strip common chain-of-thought dumps
-  if (/User wants|Word count check|^\s*\*\s*Draft:|Constraints:/im.test(text)) {
-    const bullets = text
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => /^[-*•]/.test(l) || /^\*\*[^*]+\*\*/.test(l))
-      .filter(
-        (l) =>
-          !/User wants|Context:|Role:|Mode:|Draft:|Word count|Constraints|JSON|markdown/i.test(
-            l,
-          ),
-      )
-      .slice(0, 10);
-    if (bullets.length >= 2) return bullets.join("\n").slice(0, 700);
-  }
-
-  // Drop leading meta paragraphs
-  text = text
-    .replace(/^[\s\S]*?(?=(?:^|\n)(?:#{1,3}\s+|[*-]\s+|\d+\.\s+))/m, "")
-    .trim();
-
-  return (text || raw).slice(0, 700);
 }
 
 export async function POST(req: Request) {
@@ -219,28 +197,45 @@ export async function POST(req: Request) {
     }
 
     // Learn / Practice / Revise chat via Gemma
-    const systemPrompt = `${buildSystemPrompt(mode, language)}
-
-Answer the student directly. Do not narrate your reasoning.
-Prefer short bullets. Max 120 words.`;
+    const systemPrompt = buildSystemPrompt(mode, language);
 
     const userMessage = buildUserPayload({
       notesContext,
       message,
       weakTopics: quiz.weakTopics,
+      language,
     });
 
-    const reply = await generateGemmaReply({
-      systemPrompt,
-      userMessage,
-      history: history.slice(-4),
-      maxOutputTokens: 400,
-      temperature: 0.3,
-      fast: history.length === 0,
-    });
+    let reply = "";
+    try {
+      reply = await generateGemmaReply({
+        systemPrompt,
+        userMessage,
+        history: history.slice(-4),
+        maxOutputTokens: 450,
+        temperature: 0.35,
+        // Fast path puts the student ask last and reduces instruction echoing
+        fast: true,
+      });
+      reply = cleanChatReply(reply);
+    } catch (err) {
+      const fallback = localLanguageExplain(notesContext, language);
+      if (fallback) {
+        reply = fallback;
+      } else {
+        throw err;
+      }
+    }
+
+    if (!reply || looksLikePromptEcho(reply)) {
+      const fallback = localLanguageExplain(notesContext, language);
+      reply =
+        fallback ||
+        "Nsonyiwa — nemezzawo bukopi bwa instructions. Gezaako nate: “Nnyonnyola statistics mu Luganda.”";
+    }
 
     const response: ChatResponse = {
-      reply: cleanChatReply(reply),
+      reply,
       quiz,
       xpGained: 2,
       weakTopics: quiz.weakTopics,
