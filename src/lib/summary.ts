@@ -39,38 +39,38 @@ export function normalizeSummary(input: unknown): NoteSummary | null {
       : "Study notes";
 
   if (Array.isArray(raw.slides) && raw.slides.length > 0) {
-    const slides = raw.slides
-      .map((s, i) => {
-        if (!s || typeof s !== "object") return null;
-        const slide = s as {
-          id?: unknown;
-          kind?: unknown;
-          title?: unknown;
-          bullets?: unknown;
-          terms?: unknown;
-        };
-        const bullets = Array.isArray(slide.bullets)
-          ? slide.bullets.map((b) => String(b)).filter(Boolean)
-          : [];
-        const terms = Array.isArray(slide.terms)
-          ? slide.terms.map((t) => String(t)).filter(Boolean)
-          : undefined;
-        if (bullets.length === 0 && (!terms || terms.length === 0)) return null;
-        const normalized: SummarySlide = {
-          id: typeof slide.id === "string" ? slide.id : `slide-${i}`,
-          kind: (typeof slide.kind === "string"
-            ? slide.kind
-            : "key_concepts") as SummarySlideKind,
-          title:
-            typeof slide.title === "string" && slide.title.trim()
-              ? slide.title.trim()
-              : "Slide",
-          bullets,
-        };
-        if (terms && terms.length > 0) normalized.terms = terms;
-        return normalized;
-      })
-      .filter((s): s is SummarySlide => s !== null);
+    const slides: SummarySlide[] = [];
+    raw.slides.forEach((s, i) => {
+      if (!s || typeof s !== "object") return;
+      const slide = s as {
+        id?: unknown;
+        kind?: unknown;
+        title?: unknown;
+        bullets?: unknown;
+        terms?: unknown;
+      };
+      const bullets = Array.isArray(slide.bullets)
+        ? slide.bullets.map((b) => String(b)).filter(Boolean)
+        : [];
+      const terms = Array.isArray(slide.terms)
+        ? slide.terms.map((t) => String(t)).filter(Boolean)
+        : undefined;
+      if (bullets.length === 0 && (!terms || terms.length === 0)) return;
+
+      const normalized: SummarySlide = {
+        id: typeof slide.id === "string" ? slide.id : `slide-${i}`,
+        kind: (typeof slide.kind === "string"
+          ? slide.kind
+          : "key_concepts") as SummarySlideKind,
+        title:
+          typeof slide.title === "string" && slide.title.trim()
+            ? slide.title.trim()
+            : "Slide",
+        bullets,
+      };
+      if (terms && terms.length > 0) normalized.terms = terms;
+      slides.push(normalized);
+    });
 
     if (slides.length > 0) return { title, slides };
   }
