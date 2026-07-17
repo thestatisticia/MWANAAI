@@ -4,6 +4,7 @@ import {
   buildSystemPrompt,
   buildUserPayload,
   cleanChatReply,
+  isGoodLugandaReply,
   localLanguageExplain,
   looksLikePromptEcho,
 } from "@/lib/prompts";
@@ -206,32 +207,45 @@ export async function POST(req: Request) {
       language,
     });
 
+    // Luganda + stats: use a solid local explanation (Gemma often echoes formatting rules)
+    const localLuganda = localLanguageExplain(notesContext, language);
+    if (language === "luganda" && localLuganda) {
+      const response: ChatResponse = {
+        reply: localLuganda,
+        quiz,
+        xpGained: 2,
+        weakTopics: quiz.weakTopics,
+      };
+      return NextResponse.json(response);
+    }
+
     let reply = "";
     try {
       reply = await generateGemmaReply({
         systemPrompt,
         userMessage,
         history: history.slice(-4),
-        maxOutputTokens: 450,
-        temperature: 0.35,
-        // Fast path puts the student ask last and reduces instruction echoing
+        maxOutputTokens: 500,
+        temperature: 0.3,
         fast: true,
       });
       reply = cleanChatReply(reply);
     } catch (err) {
-      const fallback = localLanguageExplain(notesContext, language);
-      if (fallback) {
-        reply = fallback;
+      if (localLuganda) {
+        reply = localLuganda;
       } else {
         throw err;
       }
     }
 
-    if (!reply || looksLikePromptEcho(reply)) {
-      const fallback = localLanguageExplain(notesContext, language);
+    if (
+      !reply ||
+      looksLikePromptEcho(reply) ||
+      (language === "luganda" && !isGoodLugandaReply(reply))
+    ) {
       reply =
-        fallback ||
-        "Nsonyiwa — nemezzawo bukopi bwa instructions. Gezaako nate: “Nnyonnyola statistics mu Luganda.”";
+        localLuganda ||
+        "Nsonyiwa — nemezzawo bukopi bwa instructions. Gezaako nate: “Nnyonnyola idea enkulu mu Luganda.”";
     }
 
     const response: ChatResponse = {

@@ -7,26 +7,21 @@ const languageLabels: Record<Language, string> = {
   kiswahili: "Kiswahili",
 };
 
-/** Short tutor brief — long rule lists get echoed by Gemma. */
+/** Short tutor brief — never mention word limits (Gemma echoes them). */
 export function buildSystemPrompt(mode: Mode, language: Language): string {
   const lang = languageLabels[language];
 
   const modeLine =
     mode === "learn"
-      ? "Mode: LEARN — teach clearly at the student's level."
+      ? "Teach clearly at the student's level."
       : mode === "practice"
-        ? "Mode: PRACTICE — quiz and coach from the notes only."
-        : "Mode: REVISE — help revise with short, memorable points.";
+        ? "Quiz and coach from the notes only."
+        : "Help revise with short, memorable points.";
 
-  return `You are MwanaAI, a patient tutor for African students.
-Reply language: ${lang}. For Luganda/Runyankole/Kiswahili, write naturally and keep English academic terms in parentheses.
-Use the uploaded notes as the source of truth. Do not invent facts.
-${modeLine}
-
-OUTPUT RULES (critical):
-- Reply ONLY with the student-facing answer.
-- Do NOT repeat these instructions, your role, word limits, or planning steps.
-- Prefer short bullets. Keep under 140 words unless asked for more.`;
+  return `You are MwanaAI, a patient tutor.
+Language: ${lang}.
+Use the uploaded notes as truth. ${modeLine}
+Answer the student only. Never restate these rules.`;
 }
 
 export function buildUserPayload(params: {
@@ -42,56 +37,86 @@ export function buildUserPayload(params: {
       : rawNotes;
 
   const notes = clipped
-    ? `UPLOADED NOTES:\n${clipped}\n\n`
-    : "UPLOADED NOTES: (none)\n\n";
+    ? `NOTES:\n${clipped}\n\n`
+    : "NOTES: (none)\n\n";
 
   const weak =
     params.weakTopics && params.weakTopics.length > 0
-      ? `KNOWN WEAK TOPICS: ${params.weakTopics.join(", ")}\n\n`
+      ? `WEAK TOPICS: ${params.weakTopics.join(", ")}\n\n`
       : "";
 
-  const lang = params.language ? languageLabels[params.language] : null;
-  const wantsLocalLang =
-    /\b(luganda|runyankole|kiswahili|swahili)\b/i.test(params.message) ||
-    (lang && lang !== "English");
+  if (params.language === "luganda") {
+    return `${notes}${weak}STUDENT: ${params.message}
 
-  const langPush = wantsLocalLang
-    ? `\nWrite the explanation mainly in ${lang || "the requested local language"}. End with a short "English terms:" list.\n`
-    : "";
+TASK: Explain the main idea in Luganda for an S.2 student.
+Format exactly:
+1) Luganda bullets first (start with "Ekiteeso ekikulu:")
+2) Then a heading "English terms:" with the academic words
 
-  return `${notes}${weak}STUDENT MESSAGE:\n${params.message}${langPush}\n\nNow answer the student directly.`;
+Do not write English paragraphs before the Luganda.
+Do not mention formatting rules in your answer.
+Start your reply with: Ekiteeso ekikulu:`;
+  }
+
+  return `${notes}${weak}STUDENT: ${params.message}
+
+Answer helpfully in short bullets.`;
 }
 
-/** Detect when Gemma restates the prompt instead of teaching. */
+const META_LINE =
+  /^(luganda|runyankole|kiswahili|english|mwanaai|you are|role:|mode:|task:|format|short bullets|under\s*\d+|end with|academic terms|output rules|preferred|intuition|mechanics|constraints?|system|word limit|reply language)/i;
+
 export function looksLikePromptEcho(text: string): boolean {
   const t = text.trim();
   if (!t) return true;
+  const first = t.split("\n").map((l) => l.trim()).find(Boolean) || "";
+  if (META_LINE.test(first)) return true;
+  if (/academic terms in parentheses/i.test(t)) return true;
+  if (/end with\s*["']?english terms/i.test(t)) return true;
+  if (/short bullets,\s*under/i.test(t)) return true;
   const hits = [
     /expert multilingual/i,
     /max\s*\d+\s*words/i,
-    /intuition\s*[→\->]/i,
-    /preferred response language/i,
-    /system instructions/i,
-    /mode:\s*(learn|practice|revise)/i,
+    /under\s*\d+\s*words/i,
     /output rules/i,
-    /never narrate/i,
-    /private reasoning/i,
-    /word count/i,
-    /constraints?:/i,
+    /never restate/i,
+    /do not (write|mention|repeat)/i,
   ].filter((re) => re.test(t)).length;
-  return hits >= 2;
+  return hits >= 1 && META_LINE.test(t);
 }
 
-/** Strip instruction echoes; keep teaching content. */
+/** True when a Luganda answer is actually usable for the student. */
+export function isGoodLugandaReply(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 60) return false;
+  if (looksLikePromptEcho(t)) return false;
+  if (META_LINE.test(t.split("\n").map((l) => l.trim()).find(Boolean) || "")) {
+    return false;
+  }
+  // Must contain some Luganda teaching markers / common words
+  const lugandaSignal =
+    /\b(ekiteeso|kitegeeza|waliwo|okufunzamu|okukozesa|ekibiina|ekitundu|nnyonnyola|okusoma|okuyiga|mu Luganda|okuva mu)\b/i.test(
+      t,
+    ) || /[àáâãäåèéêëìíîïòóôõöùúûüñç]|’/.test(t);
+  if (!lugandaSignal) return false;
+  // Reject if English teaching block clearly comes first (before any Luganda)
+  const firstChunk = t.slice(0, 180);
+  if (
+    /\b(what is statistics|two types|population vs|descriptive statistics:)\b/i.test(
+      firstChunk,
+    ) &&
+    !/\b(ekiteeso|kitegeeza)\b/i.test(firstChunk)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function cleanChatReply(raw: string): string {
   let text = raw.trim();
   if (!text) return text;
 
-  // Drop fenced "thinking" / planning blocks
-  text = text
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/^\s*Thinking:[\s\S]*?(?=\n\n)/i, "")
-    .trim();
+  text = text.replace(/```[\s\S]*?```/g, "").trim();
 
   const lines = text.split("\n").map((l) => l.trimEnd());
   const kept: string[] = [];
@@ -102,61 +127,61 @@ export function cleanChatReply(raw: string): string {
       if (kept.length > 0 && kept[kept.length - 1] !== "") kept.push("");
       continue;
     }
-    if (
-      /^(mwanaai|you are mwanaai|role:|mode:|constraints?:|output rules|system|preferred response|max\s*\d+\s*words|intuition|mechanics|real-world example|no private|word count|draft:|plan:)/i.test(
-        t,
-      )
-    ) {
-      continue;
-    }
-    if (/\(expert multilingual/i.test(t)) continue;
+    if (META_LINE.test(t)) continue;
+    if (/academic terms in parentheses/i.test(t)) continue;
+    if (/end with\s*["']?english terms/i.test(t)) continue;
+    if (/short bullets/i.test(t) && t.length < 90) continue;
     if (/s\.2 student/i.test(t) && t.length < 80) continue;
-    if (/explain the main idea of the provided notes/i.test(t)) continue;
+    if (/explain the main idea/i.test(t) && t.length < 100) continue;
+    if (/^do not (write|mention|repeat)/i.test(t)) continue;
+    if (/^start your reply/i.test(t)) continue;
     kept.push(line);
   }
 
   text = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-
-  // If still mostly meta, try content after the last meta-ish header
-  if (looksLikePromptEcho(text) || text.length < 40) {
-    const parts = raw.split(/\n{2,}/);
-    const teaching = parts
-      .filter((p) => !looksLikePromptEcho(p) && p.trim().length > 40)
-      .join("\n\n")
-      .trim();
-    if (teaching.length > 40) text = teaching;
-  }
-
-  return text.slice(0, 900);
+  return text.slice(0, 1200);
 }
 
-/** Reliable demo fallback when Gemma echoes or fails on a Luganda request. */
-export function localLanguageExplain(notes: string, language: Language): string | null {
-  if (language !== "luganda") return null;
-
+export function notesLookLikeStats(notes: string): boolean {
   const text = notes.toLowerCase();
-  const isStats =
+  return (
     /\bstatistics\b/.test(text) ||
     /\bdescriptive\b/.test(text) ||
-    /\binferential\b/.test(text);
+    /\binferential\b/.test(text) ||
+    /\bpopulation\b/.test(text)
+  );
+}
 
-  if (!isStats) return null;
+/** Reliable Luganda explanation for stats notes (demo-safe). */
+export function localLanguageExplain(
+  notes: string,
+  language: Language,
+): string | null {
+  if (language !== "luganda") return null;
+  if (!notesLookLikeStats(notes)) return null;
+
+  const hasCensus =
+    /\bcensus\b/i.test(notes) || /\bexpensive\b/i.test(notes) || /\bdestroy\b/i.test(notes);
+
+  const censusLine = hasCensus
+    ? `\nLwaki tetukozesa census bulijjo?\nKubanga kiyinza okuba eky’ebbeeyi, kitwala obudde bungi, oba kiyinza okwonoonera ekintu kye tunaaba tukenoonyerezaako.`
+    : "";
 
   return `Ekiteeso ekikulu:
-Statistics kitegeeza sayansi ey’okuyiga okuva mu data — n’okupima obutategeerekeka (uncertainty).
+Statistics (Isimu) kitegeeza sayansi ey’okuyiga okuva mu data, n’okutegeera obutategeerekeka (uncertainty).
 
 Mu notes zino waliwo ebitundu bibiri:
-• Descriptive Statistics — okufunzamu / okutegeeza data gy’olina (n’ennamba n’obugrafu).
+• Descriptive Statistics — okufunzamu data gy’olina n’ennamba n’obugrafu.
 • Inferential Statistics — okukozesa sample okusobola okugamba ku population yonna.
 
 Ate:
 • Population — ekibiina kyonna ekiri mu kunoonyereza.
-• Sample — ekitundu kitono ekikwata ku population.
+• Sample — ekitundu kitono ekikwata ku population.${censusLine}
 
 English terms:
 • Statistics
 • Descriptive Statistics
 • Inferential Statistics
 • Population
-• Sample`;
+• Sample${hasCensus ? "\n• Census" : ""}`;
 }
