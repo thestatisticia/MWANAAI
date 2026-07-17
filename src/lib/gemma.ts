@@ -2,15 +2,27 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const DEFAULT_MODEL = process.env.GEMMA_MODEL || "gemma-4-26b-a4b-it";
 
+function readApiKey(): string | undefined {
+  const raw =
+    process.env.GOOGLE_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  const key = raw?.trim();
+  return key || undefined;
+}
+
 export function getGemmaModel(generationConfig?: {
   maxOutputTokens?: number;
   temperature?: number;
 }) {
-  const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+  const apiKey = readApiKey();
 
   if (!apiKey) {
+    const onVercel = Boolean(process.env.VERCEL);
     throw new Error(
-      "Missing GOOGLE_API_KEY. Add it to .env.local (Google AI Studio key).",
+      onVercel
+        ? "Missing GOOGLE_API_KEY on Vercel. In Project Settings → Environment Variables, add GOOGLE_API_KEY for Production, then Redeploy."
+        : "Missing GOOGLE_API_KEY. Add it to .env.local (Google AI Studio key).",
     );
   }
 
