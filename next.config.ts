@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Keep pdf.js out of the Next bundler so its worker file resolves correctly.
-  serverExternalPackages: ["pdf-parse", "pdfjs-dist"],
+  // Keep document parsers out of the Next bundler for reliable serverless loads.
+  serverExternalPackages: ["unpdf", "mammoth"],
 };
 
 export default nextConfig;

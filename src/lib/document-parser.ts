@@ -1,27 +1,5 @@
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import mammoth from "mammoth";
-
-let workerReady = false;
-
-async function getPdfParse() {
-  const { PDFParse } = await import("pdf-parse");
-
-  if (!workerReady) {
-    const workerPath = path.join(
-      process.cwd(),
-      "node_modules",
-      "pdfjs-dist",
-      "legacy",
-      "build",
-      "pdf.worker.mjs",
-    );
-    PDFParse.setWorker(pathToFileURL(workerPath).href);
-    workerReady = true;
-  }
-
-  return PDFParse;
-}
+import { extractText, getDocumentProxy } from "unpdf";
 
 export async function extractTextFromFile(
   buffer: Buffer,
@@ -30,16 +8,12 @@ export async function extractTextFromFile(
   const lower = fileName.toLowerCase();
 
   if (lower.endsWith(".pdf")) {
-    const PDFParse = await getPdfParse();
-    const parser = new PDFParse({ data: buffer });
-    try {
-      const parsed = await parser.getText();
-      const text = parsed.text?.trim();
-      if (!text) throw new Error("No readable text found in this PDF.");
-      return text;
-    } finally {
-      await parser.destroy();
-    }
+    // unpdf ships a serverless PDF.js build — avoids DOMMatrix crashes on Vercel
+    const pdf = await getDocumentProxy(new Uint8Array(buffer));
+    const { text } = await extractText(pdf, { mergePages: true });
+    const merged = String(text ?? "").trim();
+    if (!merged) throw new Error("No readable text found in this PDF.");
+    return merged;
   }
 
   if (lower.endsWith(".docx")) {

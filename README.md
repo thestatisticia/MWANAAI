@@ -41,7 +41,7 @@ Personalized tutoring should not depend on where you live or which language you 
 | App | [Next.js](https://nextjs.org/) 16 (App Router) + TypeScript + React 19 |
 | Styling | Tailwind CSS 4 + custom study UI |
 | Model | **Gemma 4** via Google AI Studio (`gemma-4-26b-a4b-it` by default) |
-| Documents | `pdf-parse` (PDF), `mammoth` (DOCX) |
+| Documents | `unpdf` (PDF), `mammoth` (DOCX) |
 
 Gemma powers tutoring replies, multilingual explanations, quiz generation, and summarization. Quiz grading and slide extraction also use reliable local fallbacks so the demo stays usable if the model returns messy JSON.
 
@@ -110,7 +110,7 @@ Open [http://localhost:3000](http://localhost:3000).
 mwana-ai/
 ├── README.md
 ├── package.json
-├── next.config.ts          # pdf-parse / pdfjs worker externals
+├── next.config.ts          # serverless document-parser externals
 ├── .env.example            # API key template (no secrets)
 └── src/
     ├── app/
