@@ -56,7 +56,7 @@ export function normalizeSummary(input: unknown): NoteSummary | null {
           ? slide.terms.map((t) => String(t)).filter(Boolean)
           : undefined;
         if (bullets.length === 0 && (!terms || terms.length === 0)) return null;
-        return {
+        const normalized: SummarySlide = {
           id: typeof slide.id === "string" ? slide.id : `slide-${i}`,
           kind: (typeof slide.kind === "string"
             ? slide.kind
@@ -66,10 +66,11 @@ export function normalizeSummary(input: unknown): NoteSummary | null {
               ? slide.title.trim()
               : "Slide",
           bullets,
-          terms,
-        } satisfies SummarySlide;
+        };
+        if (terms && terms.length > 0) normalized.terms = terms;
+        return normalized;
       })
-      .filter((s): s is SummarySlide => Boolean(s));
+      .filter((s): s is SummarySlide => s !== null);
 
     if (slides.length > 0) return { title, slides };
   }
