@@ -6,6 +6,9 @@ MwanaAI helps learners upload class notes and study through three focused modes 
 
 Built for the **Build with Gemma Hackathon** (GDG Makerere) · Track: *AI Agents & Multilingual Assistants* (+ Education).
 
+**Live demo:** [https://mwanaai-sandy.vercel.app/](https://mwanaai-sandy.vercel.app/)  
+**GitHub:** [github.com/thestatisticia/MWANAAI](https://github.com/thestatisticia/MWANAAI)
+
 ---
 
 ## Why MwanaAI
@@ -189,4 +192,5 @@ Private hackathon project unless otherwise stated by the authors.
 
 ## Authors
 
-Built with Gemma 4 for GDG Makerere · [github.com/thestatisticia/MWANAAI](https://github.com/thestatisticia/MWANAAI)
+Built with Gemma 4 for GDG Makerere  
+Live: [mwanaai-sandy.vercel.app](https://mwanaai-sandy.vercel.app/) · Repo: [github.com/thestatisticia/MWANAAI](https://github.com/thestatisticia/MWANAAI)
