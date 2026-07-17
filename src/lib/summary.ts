@@ -207,10 +207,155 @@ function isGoodTerm(term: string): boolean {
 }
 
 function uniquePush(list: string[], item: string, max: number) {
-  const t = item.trim();
-  if (!t || list.includes(t)) return;
+  const t = item.trim().replace(/\s+/g, " ");
+  if (!t || list.some((x) => x.toLowerCase() === t.toLowerCase())) return;
   list.push(t.length > 155 ? `${t.slice(0, 152)}…` : t);
   if (list.length > max) list.length = max;
+}
+
+/** PDF extractors often return one blob — turn it into usable study lines. */
+function notesToRawLines(notes: string): string[] {
+  let text = notes.replace(/\r/g, "").trim();
+  text = text.replace(/(\w)-\n(\w)/g, "$1$2");
+
+  let rawLines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (rawLines.length < 8 && text.length > 200) {
+    rawLines = text
+      .replace(/\n+/g, " ")
+      .split(/(?<=[.!?])\s+|\s*;\s+(?=[A-Z])/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 12);
+  }
+
+  // Also split long lines that hide "Term: meaning" pairs
+  const expanded: string[] = [];
+  for (const line of rawLines) {
+    if (line.length > 220 && /:\s+/.test(line)) {
+      const parts = line.split(/(?<=\.)\s+(?=[A-Z][a-zA-Z0-9 /&-]{1,40}:\s)/);
+      if (parts.length > 1) {
+        expanded.push(...parts.map((p) => p.trim()).filter(Boolean));
+        continue;
+      }
+    }
+    expanded.push(line);
+  }
+
+  return expanded;
+}
+
+const CONCEPT_BANK: Array<{ re: RegExp; term: string; meaning: string }> = [
+  {
+    re: /\bdescriptive statistics\b/i,
+    term: "Descriptive Statistics",
+    meaning:
+      "Summarizing a given data set through numerical summaries and graphs",
+  },
+  {
+    re: /\binferential statistics\b/i,
+    term: "Inferential Statistics",
+    meaning:
+      "Using sample data to make conclusions or predictions about a population",
+  },
+  {
+    re: /\bpopulation\b/i,
+    term: "Population",
+    meaning: "All individuals or items under study",
+  },
+  {
+    re: /\bsample\b/i,
+    term: "Sample",
+    meaning: "A subset of the population chosen for study",
+  },
+  {
+    re: /\bqualitative\b/i,
+    term: "Qualitative Variable",
+    meaning: "A categorical variable (nominal or ordinal)",
+  },
+  {
+    re: /\bquantitative\b/i,
+    term: "Quantitative Variable",
+    meaning: "A numerical variable (discrete or continuous)",
+  },
+  {
+    re: /\bprobability\b/i,
+    term: "Probability",
+    meaning: "A measure of how likely an event is to occur",
+  },
+  {
+    re: /\bmean\b/i,
+    term: "Mean",
+    meaning: "The average of numerical values in a data set",
+  },
+  {
+    re: /\bmedian\b/i,
+    term: "Median",
+    meaning: "The middle value when data are ordered",
+  },
+  {
+    re: /\bvariance\b/i,
+    term: "Variance",
+    meaning: "A measure of how spread out values are around the mean",
+  },
+];
+
+function inferTopicTitle(text: string, terms: string[]): string {
+  if (/\bdescriptive\b/i.test(text) && /\binferential\b/i.test(text)) {
+    return "Descriptive & Inferential Statistics";
+  }
+  if (/\bphotosynthesis\b/i.test(text)) return "Photosynthesis";
+  if (/\bstatistics\b/i.test(text) && /\b(population|sample|data)\b/i.test(text)) {
+    return "Introduction to Statistics";
+  }
+  if (terms.length >= 2) return `${terms[0]} & related ideas`;
+  if (terms[0]) return terms[0];
+  return "Study notes";
+}
+
+function buildOverviewBullets(params: {
+  title: string;
+  definitions: string[];
+  keyConcepts: string[];
+  terms: string[];
+  text: string;
+}): string[] {
+  const { title, definitions, keyConcepts, terms, text } = params;
+  const bits: string[] = [];
+
+  const focus =
+    title !== "Study notes"
+      ? title
+      : inferTopicTitle(text, terms);
+
+  uniquePush(
+    bits,
+    `These notes focus on ${focus} — read them in order for revision.`,
+    4,
+  );
+
+  if (definitions[0]) uniquePush(bits, definitions[0], 4);
+  else if (keyConcepts[0]) uniquePush(bits, keyConcepts[0], 4);
+
+  if (terms.length >= 2) {
+    uniquePush(
+      bits,
+      `Core ideas to master: ${terms.slice(0, 4).join(", ")}.`,
+      4,
+    );
+  }
+
+  if (/\bdescriptive\b/i.test(text) && /\binferential\b/i.test(text)) {
+    uniquePush(
+      bits,
+      "Descriptive stats summarize the data you have; inferential stats use a sample to conclude about a population.",
+      4,
+    );
+  }
+
+  return bits.slice(0, 4);
 }
 
 function stitchLines(rawLines: string[]): string[] {
@@ -253,8 +398,8 @@ function stitchLines(rawLines: string[]): string[] {
   return out;
 }
 
-function pickTitle(lines: string[]): string {
-  for (const line of lines.slice(0, 15)) {
+function pickTitle(lines: string[], fullText: string): string {
+  for (const line of lines.slice(0, 20)) {
     const cleaned = cleanLine(line);
     if (cleaned.length < 8 || cleaned.length > 80) continue;
     if (!/^[A-Z]/.test(cleaned)) continue;
@@ -276,11 +421,18 @@ function pickTitle(lines: string[]): string {
       return colonParts.slice(1).join(": ").slice(0, 70);
     }
 
-    if (!/\?$/.test(cleaned) && cleaned.split(/\s+/).length <= 8) {
+    if (
+      !/\?$/.test(cleaned) &&
+      cleaned.split(/\s+/).length <= 10 &&
+      /\b(statistics|biology|chemistry|physics|math|algebra|calculus|probability|photosynthesis)\b/i.test(
+        cleaned,
+      )
+    ) {
       return cleaned.replace(/\s*[:\-–—].*$/, "").slice(0, 70);
     }
   }
-  return "Study notes";
+
+  return inferTopicTitle(fullText, []);
 }
 
 function isExampleLine(line: string): boolean {
@@ -290,10 +442,13 @@ function isExampleLine(line: string): boolean {
 }
 
 function isDefinitionPair(line: string): { term: string; meaning: string } | null {
-  // "Population: ..." or "Statistics is: ..."
+  // "Population: ..." or "Statistics is: ..." or "Population is ..."
   const m =
     line.match(/^([A-Za-z][A-Za-z0-9 /&-]{1,40})\s+is:\s+(.{12,})$/i) ||
-    line.match(/^([A-Za-z][A-Za-z0-9 /&-]{1,40}):\s+(.{12,})$/);
+    line.match(/^([A-Za-z][A-Za-z0-9 /&-]{1,40}):\s+(.{12,})$/) ||
+    line.match(
+      /^([A-Za-z][A-Za-z0-9 /&-]{1,40})\s+(?:is|are|means|refers to)\s+(.{12,})$/i,
+    );
   if (!m) return null;
   let term = m[1].trim().replace(/\s+(is|are)$/i, "").trim();
   const meaning = m[2].replace(/\.+$/, "").trim();
@@ -347,9 +502,8 @@ function isMistakeHint(line: string): boolean {
 /** Walk notes start→end and build ordered revision slides. */
 export function summaryFromNotes(notes: string): NoteSummary {
   const text = notes.replace(/\r/g, "").trim();
-  const rawLines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const rawLines = notesToRawLines(notes);
   const lines = stitchLines(rawLines);
-  const title = pickTitle(rawLines);
 
   const overviewBits: string[] = [];
   const keyConcepts: string[] = [];
@@ -386,51 +540,40 @@ export function summaryFromNotes(notes: string): NoteSummary {
     }
 
     if (isGoodBullet(line)) {
-      if (
-        overviewBits.length < 3 &&
-        /\b(statistics|course|study|learning|data|focus|emphasis|covers)\b/i.test(
-          line,
-        )
-      ) {
-        uniquePush(overviewBits, line, 3);
-      } else {
-        uniquePush(keyConcepts, line, 8);
-      }
+      uniquePush(keyConcepts, line, 8);
     }
   }
 
-  const known = [
-    "Descriptive Statistics",
-    "Inferential Statistics",
-    "Population",
-    "Sample",
-    "Qualitative Variable",
-    "Quantitative Variable",
-    "Probability",
-    "Random Variable",
-    "Mean",
-    "Median",
-    "Variance",
-  ];
-  for (const k of known) {
-    if (new RegExp(`\\b${k.replace(/\s+/g, "\\s+")}\\b`, "i").test(text)) {
-      if (!terms.includes(k)) terms.push(k);
-    }
+  // Seed clear definitions when the notes mention known concepts (helps messy PDFs)
+  for (const item of CONCEPT_BANK) {
+    if (!item.re.test(text)) continue;
+    if (!terms.includes(item.term)) terms.push(item.term);
+    uniquePush(definitions, `${item.term}: ${item.meaning}`, 8);
     if (terms.length >= 8) break;
   }
 
-  if (overviewBits.length === 0) {
-    overviewBits.push(
-      `These notes cover: ${title}.`,
-      terms.length > 0
-        ? `You will meet ideas such as ${terms.slice(0, 3).join(", ")}.`
-        : "Work through the slides in order for revision.",
-    );
+  let title = pickTitle(rawLines, text);
+  if (title === "Study notes") {
+    title = inferTopicTitle(text, terms);
   }
+
+  if (keyConcepts.length < 3) {
+    for (const d of definitions) uniquePush(keyConcepts, d, 8);
+  }
+
+  overviewBits.push(
+    ...buildOverviewBullets({
+      title,
+      definitions,
+      keyConcepts,
+      terms,
+      text,
+    }),
+  );
 
   // Quick revision = top definitions + key concepts condensed
   const quickRevision: string[] = [];
-  for (const d of definitions.slice(0, 3)) uniquePush(quickRevision, d, 6);
+  for (const d of definitions.slice(0, 4)) uniquePush(quickRevision, d, 6);
   for (const k of keyConcepts.slice(0, 3)) uniquePush(quickRevision, k, 6);
   if (quickRevision.length === 0) {
     uniquePush(quickRevision, `Revise the main topic: ${title}`, 3);
@@ -560,7 +703,9 @@ export function buildNoteSummary(notes: string, modelRaw?: string): NoteSummary 
 
     if (/^B\s*\|/i.test(raw)) {
       const bullet = cleanLine(raw.replace(/^B\s*\|/i, ""));
-      if (isGoodBullet(bullet)) current.bullets.push(bullet);
+      if (isGoodBullet(bullet) || bullet.length >= 28) {
+        if (!isJunkLine(bullet)) current.bullets.push(bullet.slice(0, 160));
+      }
     } else if (/^T\s*\|/i.test(raw)) {
       const term = cleanLine(raw.replace(/^T\s*\|/i, ""));
       if (isGoodTerm(term)) current.terms = [...(current.terms || []), term];
@@ -575,7 +720,21 @@ export function buildNoteSummary(notes: string, modelRaw?: string): NoteSummary 
     (s) => s.bullets.length > 0 || (s.terms && s.terms.length > 0),
   );
 
-  if (usable.length >= 2) {
+  const modelOverview = usable.find((s) => s.kind === "overview");
+  const weakModelOverview =
+    !modelOverview ||
+    modelOverview.bullets.some((b) =>
+      /these notes cover:\s*study notes|you will meet ideas such as/i.test(b),
+    ) ||
+    modelOverview.bullets.every((b) => b.length < 40);
+
+  // Prefer local when the model only produced thin/generic slides
+  const localDefs =
+    local.slides.find((s) => s.kind === "definitions")?.bullets.length || 0;
+  const modelDefs =
+    usable.find((s) => s.kind === "definitions")?.bullets.length || 0;
+
+  if (usable.length >= 3 && !weakModelOverview && modelDefs >= Math.min(2, localDefs)) {
     const title = titleLine
       ? cleanLine(titleLine.replace(/^TITLE\s*\|/i, "")).slice(0, 70)
       : local.title;
@@ -590,21 +749,23 @@ export function buildNoteSummary(notes: string, modelRaw?: string): NoteSummary 
 }
 
 export const SUMMARY_GEMMA_PROMPT = `You are MwanaAI. Read NOTES from beginning to end.
-Create condensed revision slides (do not copy large chunks).
+Write concrete revision slides from the notes — never use vague lines like "these notes cover study notes".
 Ignore citations, URLs, DOIs, course codes, and junk headings.
+Every B line must teach a real idea from the NOTES (definition, contrast, or fact).
 
 Output lines only:
-TITLE|topic title
+TITLE|specific topic title from the notes
 SLIDE|overview|Overview
-B|concise overview point
+B|what the notes are about in one clear sentence
+B|one core distinction or takeaway from the notes
 SLIDE|key_concepts|Key Concepts
-B|bullet concept
+B|concept explained in one sentence
 SLIDE|definitions|Important Definitions
-B|Term: short definition
+B|Term: short definition from the notes
 SLIDE|formulae|Important Formulae
-B|formula or equation (skip if none)
+B|formula or equation (skip slide if none)
 SLIDE|examples|Examples
-B|example from notes
+B|example from notes (skip slide if none)
 SLIDE|common_mistakes|Common Mistakes
 B|typical student mistake to avoid
 SLIDE|quick_revision|Quick Revision Points
@@ -614,4 +775,4 @@ T|Term
 SLIDE|prerequisites|Know This First
 B|what to know first
 
-Keep that order. Skip empty slides. Each B must be a complete useful learning point.`;
+Keep that order. Skip empty slides. Prefer definitions over fluff.`;

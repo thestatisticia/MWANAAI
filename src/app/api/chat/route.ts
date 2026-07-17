@@ -192,16 +192,16 @@ export async function POST(req: Request) {
         );
       }
 
-      const shortNotes = truncateNotes(notesContext, 4500);
+      const shortNotes = truncateNotes(notesContext, 6000);
       let modelRaw: string | undefined;
 
       try {
         modelRaw = await generateGemmaReply({
           systemPrompt: SUMMARY_GEMMA_PROMPT,
-          userMessage: `NOTES:\n${shortNotes}\n\nWrite the study card lines now.`,
+          userMessage: `NOTES:\n${shortNotes}\n\nWrite the study card lines now. Use real facts from the NOTES.`,
           fast: true,
-          maxOutputTokens: 450,
-          temperature: 0.2,
+          maxOutputTokens: 700,
+          temperature: 0.15,
         });
       } catch {
         modelRaw = undefined;
