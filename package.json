@@ -10,13 +10,16 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "mammoth": "^1.12.0",
     "next": "16.2.10",
+    "pdf-parse": "^2.4.5",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^20.19.43",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
